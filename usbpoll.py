@@ -57,6 +57,60 @@ def get_usb_devices_linux():
         return []
     return usb_devices
 
+def get_usb_devices_macos():
+    import subprocess
+    import json
+    """
+    Uses the 'system_profiler' command-line tool to find connected USB
+    devices on macOS and returns a list of them. Each device is
+    represented as a dictionary of its properties.
+    """
+    usb_devices = []
+    try:
+        # Execute the system_profiler command with the -json flag
+        # check=True raises CalledProcessError for non-zero exit codes
+        result = subprocess.run(
+            ['system_profiler', 'SPUSBDataType', '-json'],
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding='utf-8'
+        )
+        data = json.loads(result.stdout)
+
+        def find_devices_recursively(items):
+            for item in items:
+                # A real device usually has both a product_id and vendor_id
+                if 'product_id' in item and 'vendor_id' in item:
+                    device_info = {
+                        "Name": item.get('_name', 'N/A'),
+                        "Device ID": f"ID {item.get('vendor_id', 'N/A')}:{item.get('product_id', 'N/A')}",
+                        "Description": item.get('_name', 'N/A'),
+                        "Manufacturer": item.get('manufacturer', 'N/A'),
+                        "Status": "Connected", # system_profiler only lists connected devices
+                    }
+                    usb_devices.append(device_info)
+                
+                # Recursively check for nested items (e.g., devices on a hub)
+                if '_items' in item:
+                    find_devices_recursively(item['_items'])
+
+        # Start the recursive search from the root of the USB data
+        if 'SPUSBDataType' in data and data['SPUSBDataType']:
+            find_devices_recursively(data['SPUSBDataType'])
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing system_profiler: {e.stderr}")
+        return []
+    except json.JSONDecodeError:
+        print("Failed to parse JSON output from system_profiler. The command may have failed.")
+        return []
+    except Exception as e:
+        print(f"An unexpected error occurred on macOS: {e}")
+        return []
+    
+    return usb_devices   
+
 def get_usb_devices():
     """
     Detects the OS and calls the appropriate function to get USB devices.
@@ -65,6 +119,8 @@ def get_usb_devices():
         return get_usb_devices_windows()
     elif sys.platform.startswith('linux'):
         return get_usb_devices_linux()
+    elif sys.platform == 'darwin':
+        return get_usb_devices_macos()
     else:
         print(f"Unsupported operating system: {sys.platform}")
         return []
