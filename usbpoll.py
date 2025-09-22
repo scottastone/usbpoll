@@ -58,58 +58,68 @@ def get_usb_devices_linux():
     return usb_devices
 
 def get_usb_devices_macos():
-    import subprocess
+    """
+    Uses the 'ioreg' command-line tool to find connected USB devices on
+    macOS and returns a list of them. Each device is represented as a
+    dictionary of its properties.
+    """
     import json
-    """
-    Uses the 'system_profiler' command-line tool to find connected USB
-    devices on macOS and returns a list of them. Each device is
-    represented as a dictionary of its properties.
-    """
+    import subprocess
+    import plistlib
     usb_devices = []
     try:
-        # Execute the system_profiler command with the -json flag
+        # Execute the ioreg command to get USB device info in XML format
         # check=True raises CalledProcessError for non-zero exit codes
         result = subprocess.run(
-            ['system_profiler', 'SPUSBDataType', '-json'],
+            ['ioreg', '-p', 'IOUSB', '-a'],
             capture_output=True,
             text=True,
             check=True,
             encoding='utf-8'
         )
-        data = json.loads(result.stdout)
+        # The '-a' flag provides the output as an XML property list (plist)
+        data = plistlib.loads(result.stdout.encode('utf-8'))
 
+        # The device info is in a nested structure. This recursive
+        # function helps traverse the tree of USB hubs and devices.
         def find_devices_recursively(items):
             for item in items:
                 # A real device usually has both a product_id and vendor_id
-                if 'product_id' in item and 'vendor_id' in item:
+                if 'idProduct' in item and 'idVendor' in item:
+                    # ioreg provides IDs as decimal, convert to hex for consistency
+                    vendor_id = f"0x{item.get('idVendor', 0):04x}"
+                    product_id = f"0x{item.get('idProduct', 0):04x}"
+
                     device_info = {
-                        "Name": item.get('_name', 'N/A'),
-                        "Device ID": f"ID {item.get('vendor_id', 'N/A')}:{item.get('product_id', 'N/A')}",
-                        "Description": item.get('_name', 'N/A'),
-                        "Manufacturer": item.get('manufacturer', 'N/A'),
-                        "Status": "Connected", # system_profiler only lists connected devices
+                        "Name": item.get('USB Product Name', 'N/A'),
+                        "Device ID": f"ID {vendor_id}:{product_id}",
+                        "Description": item.get('USB Product Name', 'N/A'),
+                        "Manufacturer": item.get('USB Vendor Name', 'N/A'),
+                        "Status": "Connected",  # ioreg only lists connected devices
                     }
                     usb_devices.append(device_info)
-                
-                # Recursively check for nested items (e.g., devices on a hub)
-                if '_items' in item:
-                    find_devices_recursively(item['_items'])
 
-        # Start the recursive search from the root of the USB data
-        if 'SPUSBDataType' in data and data['SPUSBDataType']:
-            find_devices_recursively(data['SPUSBDataType'])
+                # Recursively check for nested items (children in the USB tree)
+                if 'IORegistryEntryChildren' in item:
+                    find_devices_recursively(item['IORegistryEntryChildren'])
 
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing system_profiler: {e.stderr}")
+        # Start the recursive search from the root of the ioreg output
+        find_devices_recursively(data)
+
+    except FileNotFoundError:
+        print("Could not find the 'ioreg' command. This function is intended for macOS only.")
         return []
-    except json.JSONDecodeError:
-        print("Failed to parse JSON output from system_profiler. The command may have failed.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing ioreg: {e.stderr}")
+        return []
+    except plistlib.InvalidFileException:
+        print("Failed to parse XML output from ioreg. The command may have failed.")
         return []
     except Exception as e:
         print(f"An unexpected error occurred on macOS: {e}")
         return []
-    
-    return usb_devices   
+
+    return usb_devices  
 
 def get_usb_devices():
     """
