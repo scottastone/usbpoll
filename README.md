@@ -1,6 +1,6 @@
 # usbpoll
 
-A simple USB device poller that works on Windows and Linux.
+A simple USB device poller that works on Windows and Linux. MacOS is not currently supported, but I'm working on it.
 
 ## How to Run
 
